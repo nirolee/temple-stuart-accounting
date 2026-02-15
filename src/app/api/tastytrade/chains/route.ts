@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedClient } from '@/lib/tastytrade';
+import { generateMockOptionChain } from '@/lib/mock-tastytrade-data';
 
 // Convert OCC symbol (e.g. "SPY   260221P00690000") to DXFeed format (".SPY260221P690")
 function occToDxFeed(occ: string): string | null {
@@ -39,8 +40,20 @@ export async function POST(request: Request) {
     const dteMax = Number(body.dte_max ?? 45);
 
     const client = await getAuthenticatedClient(user.id);
+
+    // 🎭 MOCK MODE: If no Tastytrade connection, use mock data
     if (!client) {
-      return NextResponse.json({ error: 'Not connected' }, { status: 401 });
+      console.log('[Chains] No Tastytrade connection, using MOCK data');
+      const today = new Date();
+      const expDate = new Date(today);
+      expDate.setDate(expDate.getDate() + 30); // 30天后到期
+      const expiration = expDate.toISOString().split('T')[0];
+
+      const mockChain = generateMockOptionChain(symbol, expiration);
+      return NextResponse.json({
+        chain: mockChain,
+        _mock: true,
+      });
     }
 
     const chainData = await client.instrumentsService.getNestedOptionChain(symbol);

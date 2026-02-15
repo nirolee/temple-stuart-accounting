@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 import { getAuthenticatedClient } from '@/lib/tastytrade';
+import { generateMockScannerResults } from '@/lib/mock-tastytrade-data';
+import { generateChinaStockScannerResults } from '@/lib/china-stock-api';
 
 const POPULAR_SYMBOLS = [
   'SPY','QQQ','IWM','AAPL','MSFT','GOOGL','AMZN','TSLA','NVDA','META',
@@ -163,9 +165,6 @@ export async function GET(request: Request) {
     }
 
     const client = await getAuthenticatedClient(user.id);
-    if (!client) {
-      return NextResponse.json({ error: 'Not connected' }, { status: 401 });
-    }
 
     const { searchParams } = new URL(request.url);
     const universe = (searchParams.get('universe') || 'popular') as Universe;
@@ -173,6 +172,31 @@ export async function GET(request: Request) {
 
     const symbols = getSymbolsForUniverse(universe, customSymbols);
     const totalSymbols = symbols.length;
+
+    // 🇨🇳 A-SHARE MODE: If no Tastytrade connection, use real China stock data
+    if (!client) {
+      console.log('[Scanner] No Tastytrade connection, using REAL China A-Share data from Eastmoney');
+      try {
+        const chinaResults = await generateChinaStockScannerResults(Math.min(30, totalSymbols));
+        return NextResponse.json({
+          metrics: chinaResults,
+          totalScanned: chinaResults.length,
+          universe: 'china_a_share',
+          fetchedAt: new Date().toISOString(),
+          _chinaStock: true, // Flag to indicate this is China stock data
+        });
+      } catch (error) {
+        console.error('[Scanner] Failed to fetch China stock data, falling back to mock:', error);
+        const mockResults = generateMockScannerResults(Math.min(30, totalSymbols));
+        return NextResponse.json({
+          metrics: mockResults,
+          totalScanned: mockResults.length,
+          universe,
+          fetchedAt: new Date().toISOString(),
+          _mock: true,
+        });
+      }
+    }
 
     // Batch symbols into chunks of 50 and fetch concurrently
     const batches: string[][] = [];
